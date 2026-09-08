@@ -27,6 +27,9 @@ bool IMUProcessor::initialize(SyncPackage &package)
     }
     acc_mean /= static_cast<double>(m_imu_cache.size());
     gyro_mean /= static_cast<double>(m_imu_cache.size());
+    // Normalize accelerometer scale so that a static reading has norm == gravity.
+    double acc_norm = acc_mean.norm();
+    m_acc_scale = (acc_norm > 1e-6) ? (State::gravity / acc_norm) : 1.0;
     m_kf->x().r_il = m_config.r_il;
     m_kf->x().t_il = m_config.t_il;
     m_kf->x().bg = gyro_mean;
@@ -67,7 +70,7 @@ void IMUProcessor::undistort(SyncPackage &package)
     V3D acc_val, gyro_val;
     double dt = 0.0;
     Input inp;
-    inp.acc = m_imu_cache.back().acc;
+    inp.acc = m_imu_cache.back().acc * m_acc_scale;
     inp.gyro = m_imu_cache.back().gyro;
     for (auto it_imu = m_imu_cache.begin(); it_imu < (m_imu_cache.end() - 1); it_imu++)
     {
@@ -76,7 +79,7 @@ void IMUProcessor::undistort(SyncPackage &package)
         if (tail.time < m_last_propagate_end_time)
             continue;
         gyro_val = 0.5 * (head.gyro + tail.gyro);
-        acc_val = 0.5 * (head.acc + tail.acc);
+        acc_val = 0.5 * (head.acc + tail.acc) * m_acc_scale;
 
         if (head.time < m_last_propagate_end_time)
             dt = tail.time - m_last_propagate_end_time;

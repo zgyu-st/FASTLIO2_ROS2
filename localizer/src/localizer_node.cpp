@@ -123,13 +123,13 @@ public:
         M4F initial_guess = M4F::Identity();
         if (m_state.service_received)
         {
-            std::lock_guard<std::mutex>(m_state.service_mutex);
+            std::lock_guard<std::mutex> lock(m_state.service_mutex);
             initial_guess = m_state.initial_guess;
             // m_state.service_received = false;
         }
         else
         {
-            std::lock_guard<std::mutex>(m_state.message_mutex);
+            std::lock_guard<std::mutex> lock(m_state.message_mutex);
             initial_guess.block<3, 3>(0, 0) = (m_state.last_offset_r * m_state.last_r).cast<float>();
             initial_guess.block<3, 1>(0, 3) = (m_state.last_offset_r * m_state.last_t + m_state.last_offset_t).cast<float>();
         }
@@ -138,7 +138,7 @@ public:
         V3D current_local_t;
         builtin_interfaces::msg::Time current_time;
         {
-            std::lock_guard<std::mutex>(m_state.message_mutex);
+            std::lock_guard<std::mutex> lock(m_state.message_mutex);
             current_local_r = m_state.last_r;
             current_local_t = m_state.last_t;
             current_time = m_state.last_message_time;
@@ -154,7 +154,7 @@ public:
             m_state.last_offset_t = -map_body_r * current_local_r.transpose() * current_local_t + map_body_t;
             if (!m_state.localize_success && m_state.service_received)
             {
-                std::lock_guard<std::mutex>(m_state.service_mutex);
+                std::lock_guard<std::mutex> lock(m_state.service_mutex);
                 m_state.localize_success = true;
                 m_state.service_received = false;
             }
@@ -165,7 +165,7 @@ public:
     void syncCB(const sensor_msgs::msg::PointCloud2::ConstSharedPtr &cloud_msg, const nav_msgs::msg::Odometry::ConstSharedPtr &odom_msg)
     {
 
-        std::lock_guard<std::mutex>(m_state.message_mutex);
+        std::lock_guard<std::mutex> lock(m_state.message_mutex);
 
         pcl::fromROSMsg(*cloud_msg, *m_state.last_cloud);
 
@@ -231,7 +231,7 @@ public:
             return;
         }
         {
-            std::lock_guard<std::mutex>(m_state.message_mutex);
+            std::lock_guard<std::mutex> lock(m_state.message_mutex);
             m_state.initial_guess.setIdentity();
             m_state.initial_guess.block<3, 3>(0, 0) = (yaw_angle * roll_angle * pitch_angle).toRotationMatrix().cast<float>();
             m_state.initial_guess.block<3, 1>(0, 3) = V3F(x, y, z);
@@ -246,7 +246,7 @@ public:
 
     void relocCheckCB(const std::shared_ptr<interface::srv::IsValid::Request> request, std::shared_ptr<interface::srv::IsValid::Response> response)
     {
-        std::lock_guard<std::mutex>(m_state.service_mutex);
+        std::lock_guard<std::mutex> lock(m_state.service_mutex);
         if (request->code == 1)
             response->valid = true;
         else

@@ -122,7 +122,8 @@ public:
             RCLCPP_WARN(this->get_logger(), "IMU Message is out of order");
             std::deque<IMUData>().swap(m_state_data.imu_buffer);
         }
-        m_state_data.imu_buffer.emplace_back(V3D(msg->linear_acceleration.x, msg->linear_acceleration.y, msg->linear_acceleration.z) * 10.0,
+        // Raw units (g or m/s^2); IMUProcessor rescales to m/s^2 using the init-time mean norm.
+        m_state_data.imu_buffer.emplace_back(V3D(msg->linear_acceleration.x, msg->linear_acceleration.y, msg->linear_acceleration.z),
                                              V3D(msg->angular_velocity.x, msg->angular_velocity.y, msg->angular_velocity.z),
                                              timestamp);
         m_state_data.last_imu_time = timestamp;

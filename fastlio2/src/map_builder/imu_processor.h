@@ -21,4 +21,7 @@ private:
     V3D m_last_gyro;
     M12D m_Q;
     IMUData m_last_imu;
+    // Scale raw accelerometer readings to m/s^2: gravity / |mean_acc| measured at init.
+    // Unit-agnostic (g or m/s^2) and matches FAST-LIO / external fastlio2 behaviour.
+    double m_acc_scale = 1.0;
 };
