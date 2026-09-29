@@ -11,6 +11,7 @@
 #include <pcl_conversions/pcl_conversions.h>
 #include <tf2_ros/transform_broadcaster.h>
 #include <geometry_msgs/msg/pose_stamped.hpp>
+#include <geometry_msgs/msg/pose_with_covariance_stamped.hpp>
 
 #include "localizers/commons.h"
 #include "localizers/icp_localizer.h"
@@ -27,6 +28,13 @@ struct NodeConfig
     std::string map_frame = "map";
     std::string local_frame = "lidar";
     double update_hz = 1.0;
+    // cag/g1: when an external filter (robot_localization EKF) owns map -> local_frame, turn the TF off and
+    // publish every successful ICP result as a pose measurement instead. Defaults keep the upstream behaviour.
+    bool publish_tf = true;
+    bool publish_pose = false;
+    double pose_std_xyz = 0.03;       // [m]   1-sigma of one ICP result, per axis
+    double pose_std_rp = 0.01;        // [rad] roll / pitch
+    double pose_std_yaw = 0.006;      // [rad]
 };
 
 struct NodeState
@@ -70,6 +78,7 @@ public:
         m_reloc_check_srv = this->create_service<interface::srv::IsValid>("relocalize_check", std::bind(&LocalizerNode::relocCheckCB, this, std::placeholders::_1, std::placeholders::_2));
 
         m_map_cloud_pub = this->create_publisher<sensor_msgs::msg::PointCloud2>("map_cloud", 10);
+        m_pose_pub = this->create_publisher<geometry_msgs::msg::PoseWithCovarianceStamped>("pose", 10);
 
         m_timer = this->create_wall_timer(10ms, std::bind(&LocalizerNode::timerCB, this));
     }
@@ -92,6 +101,17 @@ public:
         m_config.map_frame = config["map_frame"].as<std::string>();
         m_config.local_frame = config["local_frame"].as<std::string>();
         m_config.update_hz = config["update_hz"].as<double>();
+        if (config["publish_tf"])
+            m_config.publish_tf = config["publish_tf"].as<bool>();
+        if (config["publish_pose"])
+            m_config.publish_pose = config["publish_pose"].as<bool>();
+        if (config["pose_std_xyz"])
+            m_config.pose_std_xyz = config["pose_std_xyz"].as<double>();
+        if (config["pose_std_rp"])
+            m_config.pose_std_rp = config["pose_std_rp"].as<double>();
+        if (config["pose_std_yaw"])
+            m_config.pose_std_yaw = config["pose_std_yaw"].as<double>();
+        RCLCPP_INFO(this->get_logger(), "publish_tf=%d publish_pose=%d", m_config.publish_tf, m_config.publish_pose);
 
         m_localizer_config.rough_scan_resolution = config["rough_scan_resolution"].as<double>();
         m_localizer_config.rough_map_resolution = config["rough_map_resolution"].as<double>();
@@ -158,6 +178,10 @@ public:
                 m_state.localize_success = true;
                 m_state.service_received = false;
             }
+            // Only after the service-triggered relocalization has succeeded: before that, "success" may be an
+            // ICP from the identity guess against the wrong place.
+            if (m_state.localize_success)
+                publishPose(map_body_r, map_body_t, current_time);
         }
         sendBroadCastTF(current_time);
         publishMapCloud(current_time);
@@ -185,8 +209,32 @@ public:
         }
     }
 
+    void publishPose(const M3D &r, const V3D &t, const builtin_interfaces::msg::Time &time)
+    {
+        if (!m_config.publish_pose)
+            return;
+        geometry_msgs::msg::PoseWithCovarianceStamped msg;
+        msg.header.frame_id = m_config.map_frame;
+        msg.header.stamp = time;   // stamp of the cloud that was aligned, not "now"
+        Eigen::Quaterniond q(r);
+        msg.pose.pose.position.x = t.x();
+        msg.pose.pose.position.y = t.y();
+        msg.pose.pose.position.z = t.z();
+        msg.pose.pose.orientation.x = q.x();
+        msg.pose.pose.orientation.y = q.y();
+        msg.pose.pose.orientation.z = q.z();
+        msg.pose.pose.orientation.w = q.w();
+        const double sx = m_config.pose_std_xyz, srp = m_config.pose_std_rp, sy = m_config.pose_std_yaw;
+        const double var[6] = {sx * sx, sx * sx, sx * sx, srp * srp, srp * srp, sy * sy};
+        for (int i = 0; i < 6; ++i)
+            msg.pose.covariance[i * 6 + i] = var[i];
+        m_pose_pub->publish(msg);
+    }
+
     void sendBroadCastTF(builtin_interfaces::msg::Time &time)
     {
+        if (!m_config.publish_tf)
+            return;
         geometry_msgs::msg::TransformStamped transformStamped;
         transformStamped.header.frame_id = m_config.map_frame;
         transformStamped.child_frame_id = m_config.local_frame;
@@ -281,6 +329,7 @@ private:
     rclcpp::Service<interface::srv::Relocalize>::SharedPtr m_reloc_srv;
     rclcpp::Service<interface::srv::IsValid>::SharedPtr m_reloc_check_srv;
     rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr m_map_cloud_pub;
+    rclcpp::Publisher<geometry_msgs::msg::PoseWithCovarianceStamped>::SharedPtr m_pose_pub;
 };
 int main(int argc, char **argv)
 {
